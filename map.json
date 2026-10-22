@@ -1,0 +1,154 @@
+{
+  "operationalLayers": [
+    {
+      "id": "1a163a0db45-layer-2",
+      "opacity": 0.92,
+      "title": "LakeDistrictFells",
+      "url": "https://services8.arcgis.com/VELJvq5s7onWhdB5/arcgis/rest/services/LakeDistrictFells_ALEJR/FeatureServer/0",
+      "itemId": "caf040ffba684853a9bb2116ed613c42",
+      "layerType": "ArcGISFeatureLayer",
+      "layerDefinition": {
+        "drawingInfo": {
+          "renderer": {
+            "type": "simple",
+            "visualVariables": [
+              {
+                "type": "sizeInfo",
+                "field": "Metres",
+                "legendOptions": {
+                  "title": "Height (m)"
+                },
+                "stops": [
+                  {
+                    "label": "37 m",
+                    "size": 7,
+                    "value": 37
+                  },
+                  {
+                    "label": "508 m",
+                    "size": 16,
+                    "value": 507.535
+                  },
+                  {
+                    "label": "978 m",
+                    "size": 30,
+                    "value": 978.07
+                  }
+                ]
+              },
+              {
+                "type": "colorInfo",
+                "field": "Drop_",
+                "legendOptions": {
+                  "title": "Prominence (m)"
+                },
+                "stops": [
+                  {
+                    "color": [
+                      43,
+                      131,
+                      186,
+                      255
+                    ],
+                    "label": "0 m",
+                    "value": 0
+                  },
+                  {
+                    "color": [
+                      255,
+                      255,
+                      191,
+                      255
+                    ],
+                    "label": "456 m",
+                    "value": 456.1
+                  },
+                  {
+                    "color": [
+                      215,
+                      25,
+                      28,
+                      255
+                    ],
+                    "label": "912 m",
+                    "value": 912.2
+                  }
+                ]
+              }
+            ],
+            "symbol": {
+              "type": "esriSMS",
+              "color": [
+                43,
+                131,
+                186,
+                255
+              ],
+              "angle": 0,
+              "xoffset": 0,
+              "yoffset": 0,
+              "size": 10,
+              "style": "esriSMSTriangle",
+              "outline": {
+                "type": "esriSLS",
+                "color": [
+                  255,
+                  255,
+                  255,
+                  255
+                ],
+                "width": 0.7,
+                "style": "esriSLSSolid"
+              }
+            }
+          }
+        }
+      },
+      "blendMode": "normal"
+    }
+  ],
+  "baseMap": {
+    "baseMapLayers": [
+      {
+        "id": "world-hillshade-layer",
+        "showLegend": false,
+        "opacity": 1,
+        "title": "World Hillshade",
+        "url": "https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer",
+        "visibility": true,
+        "layerType": "ArcGISTiledMapServiceLayer"
+      },
+      {
+        "id": "topo-vector-base-layer",
+        "opacity": 1,
+        "title": "World Topo",
+        "visibility": true,
+        "layerType": "VectorTileLayer",
+        "styleUrl": "https://cdn.arcgis.com/sharing/rest/content/items/7dc6cea0b1764a1f9af2e679f642f0f5/resources/styles/root.json"
+      }
+    ],
+    "title": "Topographic"
+  },
+  "authoringApp": "ArcGIS API for JavaScript",
+  "authoringAppVersion": "5.1",
+  "initialState": {
+    "viewpoint": {
+      "targetGeometry": {
+        "spatialReference": {
+          "latestWkid": 3857,
+          "wkid": 102100
+        },
+        "xmin": -484399.55538015015,
+        "ymin": 7138790.492111516,
+        "xmax": -206780.26864852436,
+        "ymax": 7399287.884507271
+      }
+    }
+  },
+  "spatialReference": {
+    "latestWkid": 3857,
+    "wkid": 102100
+  },
+  "timeZone": "system",
+  "version": "2.37"
+}
