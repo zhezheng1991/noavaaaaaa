@@ -38,7 +38,10 @@
     "query-aggregate-statistics",
     "get-selection",
     "select-features",
-    "clear-selection"
+    "clear-selection",
+    "check-coordinates",
+    "read-viewpoint",
+    "set-initial-view"
   ];
   function isMapViewCommandType(type) {
     return MAP_VIEW_COMMAND_TYPES.includes(type);
@@ -101,6 +104,24 @@
         parent.targetOrigin
       );
     };
+  }
+  function readPreviewSessionView(runtimeLocation = window.location) {
+    var _a;
+    if (!isManagedPreviewLocation(runtimeLocation)) {
+      return null;
+    }
+    const parameters = new URLSearchParams(((_a = runtimeLocation.hash) != null ? _a : window.location.hash).slice(1));
+    const encoded = parameters.get("nova-app-view");
+    if (!encoded) {
+      return null;
+    }
+    try {
+      const sessionView = JSON.parse(encoded);
+      const viewpoint = sessionView == null ? void 0 : sessionView.viewpoint;
+      return typeof viewpoint === "object" && viewpoint !== null && !Array.isArray(viewpoint) && typeof (sessionView == null ? void 0 : sessionView.initialViewKey) === "string" ? { viewpoint, initialViewKey: sessionView.initialViewKey } : null;
+    } catch {
+      return null;
+    }
   }
   function readManagedBridgeContext(location) {
     var _a, _b, _c, _d, _e, _f;
@@ -474,6 +495,13 @@
   function describeBuiltInBasemapIds() {
     return BUILT_IN_BASEMAP_IDS.join(", ");
   }
+  var DEFAULT_VIEW_CENTER = Object.freeze({
+    x: -10909310097741e-6,
+    y: 472167157258e-5,
+    spatialReference: DEFAULT_BLANK_MAP_SPATIAL_REFERENCE
+  });
+  var DEFAULT_VIEW_SCALE = 2e7;
+  var DEFAULT_VIEW_ALTITUDE = 2e7;
 
   // src/agent/output/owned-graphics-layer.ts
   var OWNED_GRAPHICS_LAYER_PREFIX = "nova-graphics-";
@@ -674,8 +702,6 @@
     all: "All",
     appLoadError: "This app could not load: {message}",
     moduleLoaderUnavailable: "The ArcGIS module loader is unavailable.",
-    signInRequired: "Sign in is required to open this app.",
-    signInToOpen: "Sign in to open this app",
     actionsForLayer: "Actions for {title}",
     adjustBuffer: "Adjust buffer",
     arcgisBufferUnavailable: "ArcGIS buffer operations are unavailable in this app.",
@@ -3762,6 +3788,7 @@
       return void ((_a2 = compass.reset) == null ? void 0 : _a2.call(compass));
     });
     const compassIcon = compassButton.querySelector("calcite-icon");
+    compassIcon == null ? void 0 : compassIcon.setAttribute("scale", "m");
     const syncCompassOrientation = () => {
       var _a2;
       const orientation = (_a2 = compass.orientation) == null ? void 0 : _a2.z;
@@ -4304,10 +4331,10 @@
         icon: "magnifying-glass-plus",
         label: nativeMapText("zoomToLayer"),
         run: () => {
-          var _a, _b;
-          if (layer.fullExtent) {
-            void ((_b = (_a = resources.view).goTo) == null ? void 0 : _b.call(_a, layer.fullExtent, { duration: 500 }));
-          }
+          var _a;
+          void ((_a = options.zoomToLayer) == null ? void 0 : _a.call(options, layer).catch((error) => {
+            console.error("Failed to zoom to the layer.", error);
+          }));
         }
       },
       {
@@ -6037,6 +6064,353 @@
     });
   }
 
+  // src/frame/auth.ts
+  function getRuntimeAuth() {
+    const auth = window.__novaAuth;
+    if (!auth || !auth.token || !auth.portalUrl) {
+      return null;
+    }
+    if (auth.expiresAt && auth.expiresAt <= Date.now()) {
+      return null;
+    }
+    return auth;
+  }
+  var enterpriseInterceptorOrigin = null;
+  var enterpriseToken = null;
+  function registerRuntimeAuth(IdentityManager, esriConfig) {
+    const auth = getRuntimeAuth();
+    delete window.__novaAuth;
+    const manager = IdentityManager;
+    const config = esriConfig;
+    if (config) {
+      delete config.apiKey;
+    }
+    if (!manager || typeof manager.registerToken !== "function" || !config || !auth) {
+      return void 0;
+    }
+    const portalUrl = applyRuntimeAuth(manager, config, auth);
+    if (portalUrl) {
+      installRuntimeAuthUpdate(manager, config, portalUrl);
+    }
+    return portalUrl;
+  }
+  function applyRuntimeAuth(manager, config, auth) {
+    try {
+      const portalUrl = portalRootUrl(auth.portalUrl);
+      config.portalUrl = portalUrl;
+      manager.registerToken({
+        server: `${portalUrl}/sharing/rest`,
+        token: auth.token,
+        expires: auth.expiresAt || void 0,
+        userId: auth.username || void 0,
+        ssl: true
+      });
+      if (isArcGisOnlinePortal(portalUrl)) {
+        config.apiKey = auth.token;
+      } else {
+        enterpriseToken = auth.token;
+        installEnterpriseInterceptor(config, portalUrl);
+      }
+      return portalUrl;
+    } catch (error) {
+      reportError("preview auth registration failed for " + auth.portalUrl, error);
+      return void 0;
+    }
+  }
+  function installRuntimeAuthUpdate(manager, config, registeredPortalUrl) {
+    window.__novaApplyAuth = (next) => {
+      if (!(next == null ? void 0 : next.token) || !next.portalUrl || portalRootUrl(next.portalUrl) !== registeredPortalUrl) {
+        return false;
+      }
+      return applyRuntimeAuth(manager, config, {
+        token: next.token,
+        portalUrl: next.portalUrl,
+        ...next.expiresAt ? { expiresAt: next.expiresAt } : {},
+        ...next.username ? { username: next.username } : {}
+      }) !== void 0;
+    };
+  }
+  function portalRootUrl(value) {
+    return value.trim().replace(/\/sharing\/rest\/?$/iu, "").replace(/\/+$/u, "");
+  }
+  function isArcGisOnlinePortal(value) {
+    const host = new URL(value).hostname.toLowerCase();
+    return host === "arcgis.com" || host.endsWith(".arcgis.com");
+  }
+  function installEnterpriseInterceptor(config, portalUrl) {
+    var _a;
+    const origin = new URL(portalUrl).origin;
+    if (enterpriseInterceptorOrigin === origin) {
+      return;
+    }
+    const interceptors = (_a = config.request) == null ? void 0 : _a.interceptors;
+    if (!interceptors) {
+      return;
+    }
+    const escapedOrigin = origin.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    interceptors.push({
+      urls: new RegExp(`^${escapedOrigin}/`, "u"),
+      before(params) {
+        var _a2, _b, _c, _d, _e;
+        (_a2 = params.requestOptions) != null ? _a2 : params.requestOptions = {};
+        (_c = (_b = params.requestOptions).query) != null ? _c : _b.query = {};
+        if (enterpriseToken) {
+          (_e = (_d = params.requestOptions.query).token) != null ? _e : _d.token = enterpriseToken;
+        }
+      }
+    });
+    enterpriseInterceptorOrigin = origin;
+  }
+
+  // src/frame/view.ts
+  var MODULE_IDS = [
+    "esri/WebMap",
+    "esri/WebScene",
+    "esri/Basemap",
+    "esri/views/MapView",
+    "esri/views/SceneView",
+    "esri/layers/FeatureLayer",
+    "esri/layers/GraphicsLayer",
+    "esri/Graphic",
+    "esri/Viewpoint",
+    "esri/identity/IdentityManager",
+    "esri/config"
+  ];
+  function collectionLength(value) {
+    const collection = asRecord(value);
+    const length = collection == null ? void 0 : collection.length;
+    if (typeof length === "number") {
+      return length;
+    }
+    return typeof (collection == null ? void 0 : collection.toArray) === "function" ? collection.toArray().length : 0;
+  }
+  function declaresBasemapLayers(document2, map) {
+    const baseMap = asRecord(document2.baseMap);
+    if (Array.isArray(baseMap == null ? void 0 : baseMap.baseMapLayers) && baseMap.baseMapLayers.length > 0) {
+      return true;
+    }
+    const basemap = asRecord(map.basemap);
+    return Boolean(basemap) && (collectionLength(basemap == null ? void 0 : basemap.baseLayers) > 0 || collectionLength(basemap == null ? void 0 : basemap.referenceLayers) > 0);
+  }
+  function observeViewResize(container, view) {
+    if (typeof ResizeObserver === "undefined") {
+      return () => void 0;
+    }
+    let scheduled = false;
+    const observer = new ResizeObserver(() => {
+      if (scheduled) {
+        return;
+      }
+      scheduled = true;
+      requestAnimationFrame(() => {
+        var _a;
+        scheduled = false;
+        (_a = view.resize) == null ? void 0 : _a.call(view);
+      });
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }
+  function suppressViewFocusFrame(container) {
+    container.style.setProperty("--arcgis-internal-view-outline", "none");
+    container.style.setProperty("--esri-view-outline", "none");
+  }
+  function restoreBuiltInTerrain(map, mapDocument) {
+    const ground = asRecord(mapDocument.ground);
+    const groundId = typeof (ground == null ? void 0 : ground.groundId) === "string" ? ground.groundId.trim() : "";
+    if (!groundId) {
+      return void 0;
+    }
+    const customGroundLayers = readGroundLayers(map.ground);
+    map.ground = groundId;
+    const restoredGround = asRecord(map.ground);
+    const restoredGroundLayers = asRecord(restoredGround == null ? void 0 : restoredGround.layers);
+    const addGroundLayer = restoredGroundLayers == null ? void 0 : restoredGroundLayers.add;
+    if (typeof addGroundLayer !== "function") {
+      return groundId;
+    }
+    customGroundLayers.forEach((layer) => addGroundLayer.call(restoredGroundLayers, layer));
+    return groundId;
+  }
+  function readGroundLayers(ground) {
+    var _a;
+    const layers = asRecord((_a = asRecord(ground)) == null ? void 0 : _a.layers);
+    if (typeof (layers == null ? void 0 : layers.toArray) !== "function") {
+      return [];
+    }
+    const values = layers.toArray();
+    return Array.isArray(values) ? values : [];
+  }
+  function asRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+  }
+  function readInitialView(viewpoint, scene) {
+    const camera = asRecord(viewpoint == null ? void 0 : viewpoint.camera);
+    if (scene && camera) {
+      return { camera };
+    }
+    const target = asRecord(viewpoint == null ? void 0 : viewpoint.targetGeometry);
+    const scale = typeof (viewpoint == null ? void 0 : viewpoint.scale) === "number" && viewpoint.scale > 0 ? viewpoint.scale : null;
+    const rotation = !scene && typeof (viewpoint == null ? void 0 : viewpoint.rotation) === "number" && viewpoint.rotation !== 0 ? { rotation: viewpoint.rotation } : {};
+    if (typeof (target == null ? void 0 : target.xmin) === "number" && typeof target.ymin === "number") {
+      return { extent: target, ...rotation };
+    }
+    if (typeof (target == null ? void 0 : target.x) === "number" && typeof target.y === "number") {
+      return { center: target, ...scale ? { scale } : {}, ...rotation };
+    }
+    return scene ? {
+      camera: {
+        position: { ...DEFAULT_VIEW_CENTER, z: DEFAULT_VIEW_ALTITUDE },
+        heading: 0,
+        tilt: 0
+      }
+    } : { center: { ...DEFAULT_VIEW_CENTER }, scale: DEFAULT_VIEW_SCALE };
+  }
+  function readInitialViewpoint(mapDocument) {
+    var _a;
+    return asRecord((_a = asRecord(mapDocument.initialState)) == null ? void 0 : _a.viewpoint);
+  }
+  function initialViewKey(viewpoint) {
+    var _a;
+    const target = asRecord(viewpoint == null ? void 0 : viewpoint.targetGeometry);
+    const position = asRecord((_a = asRecord(viewpoint == null ? void 0 : viewpoint.camera)) == null ? void 0 : _a.position);
+    const place = target != null ? target : position ? {
+      x: position.x,
+      y: position.y,
+      ...position.spatialReference ? { spatialReference: position.spatialReference } : {}
+    } : null;
+    return place ? sortedJson(place) : "";
+  }
+  function sortedJson(value) {
+    return JSON.stringify(value, (_key, nested) => {
+      const record = asRecord(nested);
+      return record ? Object.fromEntries(Object.entries(record).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : nested;
+    });
+  }
+  function readOpeningViewpoint(mapDocument, sessionView) {
+    const initialViewpoint = readInitialViewpoint(mapDocument);
+    return sessionView && sessionView.initialViewKey === initialViewKey(initialViewpoint) ? sessionView.viewpoint : initialViewpoint;
+  }
+  function initView(config, mapDocument, sessionView = null) {
+    const container = document.getElementById("app-view");
+    if (!container) {
+      return Promise.reject(new Error("The app map container is missing."));
+    }
+    return new Promise((resolve, reject) => {
+      loadArcgisModules(
+        MODULE_IDS,
+        async (modules, moduleLoader) => {
+          var _a, _b, _c;
+          try {
+            const portalUrl = registerRuntimeAuth(
+              modules["esri/identity/IdentityManager"],
+              modules["esri/config"]
+            );
+            const scene = isScene(config);
+            const Document = modules[scene ? "esri/WebScene" : "esri/WebMap"];
+            const View = modules[scene ? "esri/views/SceneView" : "esri/views/MapView"];
+            if (!(Document == null ? void 0 : Document.fromJSON) || !View) {
+              throw new Error("The ArcGIS Map or View module is unavailable.");
+            }
+            const { document: readableDocument, collections } = splitRuntimeFeatureCollections(
+              mapDocument,
+              scene
+            );
+            const map = Document.fromJSON(readableDocument);
+            if (collections.length > 0) {
+              restoreFeatureCollections(
+                map,
+                collections,
+                modules["esri/layers/FeatureLayer"],
+                modules["esri/layers/GraphicsLayer"],
+                modules["esri/Graphic"]
+              );
+            }
+            if (!declaresBasemapLayers(mapDocument, map)) {
+              const Basemap = modules["esri/Basemap"];
+              const fallback = (_a = Basemap == null ? void 0 : Basemap.fromId(
+                scene ? DEFAULT_BLANK_SCENE_BASEMAP_ID : DEFAULT_BLANK_MAP_BASEMAP_ID
+              )) != null ? _a : null;
+              if (fallback) {
+                map.basemap = fallback;
+                void Promise.resolve((_b = fallback.load) == null ? void 0 : _b.call(fallback)).catch((error) => {
+                  reportError("the fallback basemap could not be loaded", error);
+                });
+              }
+            }
+            const builtInGroundId = scene ? restoreBuiltInTerrain(map, mapDocument) : void 0;
+            const appPresentation = config.nova.presentationMode === "app";
+            suppressViewFocusFrame(container);
+            const view = new View({
+              container,
+              map,
+              popup: appPresentation ? { defaultPopupTemplateEnabled: true } : null,
+              popupEnabled: appPresentation,
+              ...readInitialView(readOpeningViewpoint(mapDocument, sessionView), scene)
+            });
+            if (scene) {
+              recoverStalledSceneGoTo(view);
+            }
+            (_c = view.when) == null ? void 0 : _c.call(
+              view,
+              () => {
+                const stopObservingResize = observeViewResize(container, view);
+                window.addEventListener("pagehide", stopObservingResize, { once: true });
+                const initialViewpoint = readInitialViewpoint(mapDocument);
+                resolve({
+                  map,
+                  view,
+                  modules,
+                  moduleLoader,
+                  ...initialViewpoint ? { initialViewpoint } : {},
+                  ...builtInGroundId ? { builtInGroundId } : {},
+                  ...portalUrl ? { portalUrl } : {}
+                });
+              },
+              (error) => reject(error)
+            );
+          } catch (error) {
+            reportError("app view could not be initialized", error);
+            reject(error);
+          }
+        },
+        reject
+      );
+    });
+  }
+  function restoreFeatureCollections(map, collections, FeatureLayer, GraphicsLayer, Graphic) {
+    var _a;
+    const document2 = map;
+    (_a = document2.when) == null ? void 0 : _a.call(document2, () => {
+      var _a2, _b, _c, _d;
+      for (const { index, json, parentId, sourceLayerType } of collections) {
+        try {
+          const layer = sourceLayerType === "graphics" ? readEmbeddedGraphicsCollectionLayer(GraphicsLayer, Graphic, json) : readEmbeddedFeatureCollectionLayer(FeatureLayer, json);
+          const target = parentId ? (_b = (_a2 = document2.findLayerById) == null ? void 0 : _a2.call(document2, parentId)) == null ? void 0 : _b.layers : document2;
+          (_c = target == null ? void 0 : target.add) == null ? void 0 : _c.call(target, layer, index);
+        } catch (error) {
+          reportError(`the layer "${String((_d = json.title) != null ? _d : json.id)}" could not be restored`, error);
+        }
+      }
+    });
+  }
+  function recoverStalledSceneGoTo(view) {
+    const goTo = view.goTo;
+    if (typeof goTo !== "function") {
+      return;
+    }
+    view.goTo = async (target, options) => {
+      try {
+        return await goTo.call(view, target, options);
+      } catch (error) {
+        if ((error == null ? void 0 : error.name) !== "GotoAnimation:missing-animation") {
+          throw error;
+        }
+        return await goTo.call(view, target, { ...options, animate: false });
+      }
+    };
+  }
+
   // src/frame/visualization.ts
   function isRecord5(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -6385,6 +6759,12 @@
        * camera is framed by the runtime itself; once a navigation has chosen a view, no add replaces it.
        */
       __publicField(this, "cameraMovedSinceMount", false);
+      /**
+       * The initial view, `initialState.viewpoint` in the document. Home goes there. Only
+       * `set-initial-view` changes it, after the host has written the document.
+       */
+      __publicField(this, "initialViewpoint");
+      __publicField(this, "viewChangeHandle", null);
       __publicField(this, "startupState", "constructed");
       __publicField(this, "startupFailure");
       __publicField(this, "status", "");
@@ -6437,9 +6817,12 @@
         "go-to-coordinates": async (input) => await this.goToCoordinates(input),
         "go-to-extent": async (input) => await this.goToExtent(input),
         "go-to-layer": async (input) => await this.goToLayer(input),
-        "get-layer-schema": async (input) => ({
-          schema: this.buildLayerSchema(this.requireLayer(input.layerId))
-        }),
+        "get-layer-schema": async (input) => {
+          var _a;
+          const layer = this.requireLayer(input.layerId);
+          await ((_a = layer.load) == null ? void 0 : _a.call(layer));
+          return { schema: this.buildLayerSchema(layer) };
+        },
         "query-feature-count": async (input) => ({
           count: await this.queryFeatureCount(input.layerId, input.where)
         }),
@@ -6453,10 +6836,25 @@
           const cleared = this.selection.count > 0;
           this.clearSelection();
           return { cleared };
+        },
+        "read-viewpoint": async () => ({ viewpoint: this.currentInitialViewpoint() }),
+        "check-coordinates": async (input) => {
+          for (const geometry of input.geometries) {
+            assertLatitudes(await this.deserializeGeometry(geometry), readGeometryYs(geometry));
+          }
+          return { checked: input.geometries.length };
+        },
+        "set-initial-view": async (input) => {
+          if (!isRecord4(input.viewpoint)) {
+            throw new Error("set-initial-view requires a viewpoint.");
+          }
+          return { viewpoint: this.setInitialViewpoint(input.viewpoint) };
         }
       });
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
       this.sourceLayerIds = collectLayerIds((_c = (_b = (_a = resources.map.layers) == null ? void 0 : _a.toArray) == null ? void 0 : _b.call(_a)) != null ? _c : []);
+      this.initialViewpoint = (_d = resources.initialViewpoint) != null ? _d : null;
+      this.applyInitialViewToMap();
       this.config.nova.ownedGraphicsLayerIds.forEach((layerId) => {
         this.managedGraphicLayerIds.add(layerId);
       });
@@ -6578,11 +6976,125 @@
       };
     }
     setUiEventPublisher(publisher, hostActions = {}) {
+      var _a, _b;
       this.uiEventPublisher = publisher;
       this.hostActions = {
         attachSelection: publisher !== null && hostActions.attachSelection === true,
         spatialSuggestions: publisher !== null && hostActions.spatialSuggestions === true
       };
+      (_b = (_a = this.viewChangeHandle) == null ? void 0 : _a.remove) == null ? void 0 : _b.call(_a);
+      this.viewChangeHandle = null;
+      if (publisher) {
+        void this.reportViewChanges();
+      }
+    }
+    /**
+     * Tells the Preview host where the view settles after each move, so the next frame for this
+     * output opens there. A reload then keeps the reader's place without writing it to the document.
+     */
+    async reportViewChanges() {
+      try {
+        const { watch } = await this.importModule("esri/core/reactiveUtils");
+        if (typeof watch !== "function" || !this.uiEventPublisher) {
+          return;
+        }
+        this.viewChangeHandle = watch(
+          () => this.resources.view.stationary,
+          (stationary) => {
+            var _a;
+            if (stationary === true) {
+              (_a = this.uiEventPublisher) == null ? void 0 : _a.call(this, {
+                type: "view-changed",
+                sessionView: {
+                  viewpoint: this.sessionViewpoint(),
+                  initialViewKey: initialViewKey(this.initialViewpoint)
+                }
+              });
+            }
+          }
+        );
+      } catch (error) {
+        reportError("watching the view for the Preview host failed", error);
+      }
+    }
+    /**
+     * Where the view is, exactly: a 2D view's center, scale and rotation, or a scene's camera. A
+     * scene also carries its center and scale, which a 2D view opens at after a conversion.
+     */
+    sessionViewpoint() {
+      const { view } = this.resources;
+      const center = serializeValue(view.center);
+      const scale = typeof view.scale === "number" && Number.isFinite(view.scale) ? view.scale : null;
+      const target = {
+        ...isRecord4(center) ? { targetGeometry: center } : {},
+        ...scale ? { scale } : {}
+      };
+      if (this.config.map.type === "webscene") {
+        const camera = serializeValue(view.camera);
+        return { ...isRecord4(camera) ? { camera } : {}, ...target };
+      }
+      return { ...target, rotation: typeof view.rotation === "number" ? view.rotation : 0 };
+    }
+    /**
+     * Where the view is, as an initial view: the extent it shows, which the Web Map specification and a
+     * Portal publication both expect, with a 2D view's scale and rotation or a scene's camera.
+     */
+    currentInitialViewpoint() {
+      const { view } = this.resources;
+      const extent = serializeValue(view.extent);
+      const targetGeometry = isRecord4(extent) ? { targetGeometry: extent } : {};
+      if (this.config.map.type === "webscene") {
+        const camera = serializeValue(view.camera);
+        return { ...isRecord4(camera) ? { camera } : {}, ...targetGeometry };
+      }
+      return {
+        ...targetGeometry,
+        ...typeof view.scale === "number" && Number.isFinite(view.scale) ? { scale: view.scale } : {},
+        rotation: typeof view.rotation === "number" ? view.rotation : 0
+      };
+    }
+    /** Makes a viewpoint the initial view in this frame: Home goes there from now on. */
+    setInitialViewpoint(viewpoint) {
+      var _a;
+      this.initialViewpoint = { ...viewpoint };
+      this.applyInitialViewToMap();
+      for (const [id, host] of this.widgets) {
+        if (((_a = this.config.app.widgets.find((widget) => widget.id === id)) == null ? void 0 : _a.type) === "home") {
+          this.applyInitialViewToHome(host);
+        }
+      }
+      return viewpoint;
+    }
+    /**
+     * Keeps the map's `initialViewProperties.viewpoint` the same as the initial view. The SDK reads it
+     * from `initialState` when the document opens; after `set-initial-view` only this keeps it
+     * current. A script reads the initial view there, and a capture writes it back from there.
+     */
+    applyInitialViewToMap() {
+      const viewpoint = this.readInitialViewpoint();
+      const properties = this.resources.map.initialViewProperties;
+      if (viewpoint && properties) {
+        properties.viewpoint = viewpoint;
+      }
+    }
+    /**
+     * Points a Home control at the initial view. Without it Home goes to where the view first opened,
+     * which after a reload is the reader's last place, not the initial view.
+     */
+    applyInitialViewToHome(home) {
+      const viewpoint = this.readInitialViewpoint();
+      if (viewpoint) {
+        home.viewpoint = viewpoint;
+      }
+    }
+    /** The initial view as an SDK `Viewpoint`, or null when the map has none. */
+    readInitialViewpoint() {
+      var _a, _b;
+      if (!this.initialViewpoint) {
+        return null;
+      }
+      const Viewpoint = this.resources.modules["esri/Viewpoint"];
+      return (_b = (_a = Viewpoint == null ? void 0 : Viewpoint.fromJSON) == null ? void 0 : _a.call(Viewpoint, this.initialViewpoint)) != null ? _b : null;
     }
     /** Where the view settled once a navigation resolved, read back rather than echoed from the request. */
     settledViewState() {
@@ -6873,6 +7385,13 @@
       }
       this.nativeMapContents = mountNativeMapContents(this.resources, {
         onMapDocumentChange: () => this.publishMapDocumentChanged(),
+        zoomToLayer: async (layer) => {
+          var _a, _b;
+          const extent = await this.layerExtent(layer);
+          if (extent) {
+            await ((_b = (_a = this.resources.view).goTo) == null ? void 0 : _b.call(_a, extent, { duration: 500 }));
+          }
+        },
         ...this.uiEventPublisher ? {
           onAttachLayer: (layer) => {
             var _a;
@@ -6909,6 +7428,9 @@
         var _a, _b;
         (_b = (_a = this.resources.view.ui) == null ? void 0 : _a.remove) == null ? void 0 : _b.call(_a, control);
       });
+      if (this.resources.view.ui) {
+        this.resources.view.ui.padding = 0;
+      }
     }
     publishMapDocumentChanged() {
       var _a;
@@ -7257,7 +7779,7 @@
       window.addEventListener("pagehide", () => this.disposeFrameRuntime(), { once: true });
     }
     disposeFrameRuntime() {
-      var _a, _b, _c, _d, _e, _f, _g;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i;
       this.runtimeClickGeneration += 1;
       this.selectionHighlightGeneration += 1;
       for (const pending of this.pendingGraphicPersistence.values()) {
@@ -7269,20 +7791,22 @@
       this.pendingGraphicPersistence.clear();
       (_b = (_a = this.interactionListener) == null ? void 0 : _a.remove) == null ? void 0 : _b.call(_a);
       this.interactionListener = null;
-      (_c = this.locationHoldController) == null ? void 0 : _c.dispose();
+      (_d = (_c = this.viewChangeHandle) == null ? void 0 : _c.remove) == null ? void 0 : _d.call(_c);
+      this.viewChangeHandle = null;
+      (_e = this.locationHoldController) == null ? void 0 : _e.dispose();
       this.locationHoldController = null;
       try {
-        (_d = this.selectionHighlight) == null ? void 0 : _d.remove();
+        (_f = this.selectionHighlight) == null ? void 0 : _f.remove();
       } finally {
         this.selectionHighlight = null;
         this.selection = { ...EMPTY_SELECTION };
         this.activeLocation = null;
         this.selectionFeatures = [];
-        (_e = this.nativeMapContents) == null ? void 0 : _e.dispose();
+        (_g = this.nativeMapContents) == null ? void 0 : _g.dispose();
         this.nativeMapContents = null;
-        (_f = this.nativeSelectionPopup) == null ? void 0 : _f.dispose();
+        (_h = this.nativeSelectionPopup) == null ? void 0 : _h.dispose();
         this.nativeSelectionPopup = null;
-        (_g = this.elementPick) == null ? void 0 : _g.dispose();
+        (_i = this.elementPick) == null ? void 0 : _i.dispose();
         this.elementPick = null;
         document.body.classList.remove("app-map-presentation");
         this.uiEventPublisher = null;
@@ -7309,6 +7833,9 @@
       }
       widgetElement.view = this.resources.view;
       Object.assign(widgetElement, widget.config);
+      if (widget.type === "home") {
+        this.applyInitialViewToHome(widgetElement);
+      }
       let host = widgetElement;
       if (component.expandIcon) {
         const expand = document.createElement("arcgis-expand");
@@ -7514,8 +8041,15 @@
         if (layerId2) {
           this.sourceLayerIds.add(layerId2);
         }
-        const framed = payload.frameIfFirst === true && await this.frameFirstLayer(layer2);
-        return { applied: true, layerId: layerId2, ...framed ? { framed: true } : {} };
+        const extent = payload.frameIfFirst === true || payload.reportInitialView === true ? await this.layerExtent(layer2) : null;
+        const framed = payload.frameIfFirst === true && extent !== null && this.frameFirstLayer(extent);
+        const initialView = payload.reportInitialView === true && extent !== null ? { targetGeometry: serializeValue(extent) } : null;
+        return {
+          applied: true,
+          layerId: layerId2,
+          ...framed ? { framed: true } : {},
+          ...initialView ? { initialView } : {}
+        };
       }
       if (type === "remove-layer") {
         const layerId2 = typeof payload.layerId === "string" ? payload.layerId : "";
@@ -7891,27 +8425,114 @@
       return await handler(payload);
     }
     /**
+     * The extent a layer covers, in the view's spatial reference, or null when it has none.
+     *
+     * Every reader of a layer's extent comes here: the first layer's framing and initial view,
+     * `go_to` a layer, and Zoom to layer in the layer list. Each had its own copy, and only one of
+     * them knew a group layer, which has no extent of its own even after its layers load (SDK
+     * 5.1.3). Its layers' extents are joined instead.
+     *
+     * Those layers can be in different spatial references. `Extent.union` compares the numbers
+     * without projecting, and it changes the extent it is called on, which here was a layer's own
+     * `fullExtent`. So every extent is first projected into a new one in the view's spatial
+     * reference. An initial view written from it is then in the map's spatial reference, the same as
+     * one written from the view.
+     *
+     * A layer whose extent cannot be read or projected has none here, and the failure is reported.
+     * The callers only frame with it, so it must not fail the add that already put the layer on the
+     * map.
+     */
+    async layerExtent(layer) {
+      var _a, _b, _c, _d, _e, _f, _g;
+      const target = layer;
+      try {
+        await ((_a = target.load) == null ? void 0 : _a.call(target));
+      } catch {
+        return null;
+      }
+      let extents = [];
+      if (target.fullExtent) {
+        extents = [target.fullExtent];
+      } else if (target.allLayers) {
+        await ((_b = target.loadAll) == null ? void 0 : _b.call(target).catch((error) => {
+          reportError("loading the layers of a group layer failed", error);
+        }));
+        extents = ((_e = (_d = (_c = target.allLayers).toArray) == null ? void 0 : _d.call(_c)) != null ? _e : []).flatMap(
+          (child) => child.fullExtent ? [child.fullExtent] : []
+        );
+      }
+      try {
+        if (extents.length === 0 && target.queryExtent) {
+          const { extent } = await target.queryExtent((_g = (_f = target.createQuery) == null ? void 0 : _f.call(target)) != null ? _g : {});
+          extents = extent ? [extent] : [];
+        }
+        const projected = await this.projectToView(extents);
+        return projected.length > 0 ? projected.slice(1).reduce((joined, next) => {
+          var _a2, _b2;
+          return (_b2 = (_a2 = joined.union) == null ? void 0 : _a2.call(joined, next)) != null ? _b2 : joined;
+        }, projected[0]) : null;
+      } catch (error) {
+        reportError("reading the extent of a layer failed", error);
+        return null;
+      }
+    }
+    /** New extents in the view's spatial reference. The extents passed in are left unchanged. */
+    async projectToView(extents) {
+      var _a, _b, _c, _d, _e, _f;
+      const spatialReference = this.resources.view.spatialReference;
+      if (!spatialReference || extents.every((extent) => {
+        var _a2, _b2;
+        return (_b2 = (_a2 = extent.spatialReference) == null ? void 0 : _a2.equals) == null ? void 0 : _b2.call(_a2, spatialReference);
+      })) {
+        return extents.map((extent) => {
+          var _a2, _b2;
+          return (_b2 = (_a2 = extent.clone) == null ? void 0 : _a2.call(extent)) != null ? _b2 : extent;
+        });
+      }
+      const webMercatorUtils = await this.importModule(
+        "esri/geometry/support/webMercatorUtils"
+      );
+      const projected = [];
+      for (const extent of extents) {
+        const next = ((_b = (_a = extent.spatialReference) == null ? void 0 : _a.equals) == null ? void 0 : _b.call(_a, spatialReference)) ? (_d = (_c = extent.clone) == null ? void 0 : _c.call(extent)) != null ? _d : extent : ((_e = webMercatorUtils.canProject) == null ? void 0 : _e.call(webMercatorUtils, extent.spatialReference, spatialReference)) ? (_f = webMercatorUtils.project) == null ? void 0 : _f.call(webMercatorUtils, extent, spatialReference) : await this.projectWithEngine(extent, spatialReference);
+        if (next) {
+          projected.push(next);
+        }
+      }
+      return projected;
+    }
+    /**
+     * One extent through the projection engine, for spatial references the view cannot project
+     * without it.
+     *
+     * One at a time: `executeMany` reads every geometry in the first one's spatial reference (SDK
+     * 5.1.3), and a group's layers can each have their own.
+     */
+    async projectWithEngine(extent, spatialReference) {
+      var _a, _b;
+      const projectOperator = await this.importModule(
+        "esri/geometry/operators/projectOperator"
+      );
+      if (!((_a = projectOperator.isLoaded) == null ? void 0 : _a.call(projectOperator))) {
+        await ((_b = projectOperator.load) == null ? void 0 : _b.call(projectOperator));
+      }
+      if (!projectOperator.execute) {
+        throw new Error("The ArcGIS projection operator is unavailable in the open app.");
+      }
+      return projectOperator.execute(extent, spatialReference);
+    }
+    /**
      * Frame a layer that arrives on an empty map whose camera nothing has moved yet.
      *
      * Leaving this to the model made framing a coin flip: the add and the navigation were separate
      * decisions in separate calls, and measured runs left the map at its default extent for 6 to 150
      * seconds after the data had loaded. The camera move is started, not awaited, so the add does not
-     * wait on an animation.
+     * wait on an animation. The initial view does not depend on it: it is the extent itself.
      */
-    async frameFirstLayer(layer) {
-      var _a, _b, _c;
-      const map = this.resources.map;
+    frameFirstLayer(extent) {
+      var _a, _b;
       const goTo = this.resources.view.goTo;
-      if (this.cameraMovedSinceMount || !goTo || ((_b = (_a = map.layers) == null ? void 0 : _a.toArray) == null ? void 0 : _b.call(_a).length) !== 1) {
-        return false;
-      }
-      try {
-        await ((_c = layer.load) == null ? void 0 : _c.call(layer));
-      } catch {
-        return false;
-      }
-      const extent = layer.fullExtent;
-      if (!extent) {
+      if (this.cameraMovedSinceMount || !goTo || ((_b = (_a = this.resources.map.layers) == null ? void 0 : _a.toArray) == null ? void 0 : _b.call(_a).length) !== 1) {
         return false;
       }
       this.cameraMovedSinceMount = true;
@@ -7926,12 +8547,15 @@
       if (!goTo) {
         throw new Error("The open app view cannot navigate.");
       }
-      const point = await this.deserializeGeometry({
-        x: input.longitude,
-        y: input.latitude,
-        ...input.altitude !== void 0 ? { z: input.altitude } : {},
-        spatialReference: { wkid: 4326 }
-      });
+      const point = await this.deserializeGeometry(
+        withGeographicDefault({
+          x: input.x,
+          y: input.y,
+          ...input.spatialReference ? { spatialReference: input.spatialReference } : {}
+        })
+      );
+      assertLatitudes(point, [input.y]);
+      const geographic = isGeographic(point);
       await goTo.call(
         this.resources.view,
         input.scale !== void 0 ? { target: point, scale: input.scale } : point,
@@ -7940,7 +8564,7 @@
         }
       );
       return {
-        message: `Flew to ${input.latitude.toFixed(4)}, ${input.longitude.toFixed(4)}`,
+        message: geographic ? `Flew to longitude ${input.x}, latitude ${input.y}` : `Flew to x ${input.x}, y ${input.y}`,
         ...this.settledViewState()
       };
     }
@@ -7954,20 +8578,16 @@
       if (!goTo) {
         throw new Error("The open app view cannot navigate.");
       }
-      await goTo.call(
-        this.resources.view,
-        await this.deserializeGeometry(withGeographicDefault(extent)),
-        {
-          ...typeof input.durationMs === "number" ? { duration: input.durationMs } : {}
-        }
-      );
+      const target = await this.deserializeGeometry(withGeographicDefault(extent));
+      assertLatitudes(target, [extent.ymin, extent.ymax]);
+      await goTo.call(this.resources.view, target, {
+        ...typeof input.durationMs === "number" ? { duration: input.durationMs } : {}
+      });
       return { message: "Extent updated", ...this.settledViewState() };
     }
     async goToLayer(input) {
-      var _a, _b, _c;
       this.cameraMovedSinceMount = true;
-      const layer = this.requireLayer(input.layerId);
-      const target = (_c = layer.fullExtent) != null ? _c : typeof layer.queryExtent === "function" ? (await layer.queryExtent((_b = (_a = layer.createQuery) == null ? void 0 : _a.call(layer)) != null ? _b : {})).extent : void 0;
+      const target = await this.layerExtent(this.requireLayer(input.layerId));
       if (!target) {
         throw new Error(`Layer has no extent to zoom to: ${input.layerId}`);
       }
@@ -7998,10 +8618,9 @@
         });
       }
       if ((spatialFilter == null ? void 0 : spatialFilter.kind) === "extent") {
-        return await this.queryLayerBySpatialFilter({
-          ...query,
-          geometry: await this.deserializeGeometry(withGeographicDefault(spatialFilter.extent))
-        });
+        const extent = await this.deserializeGeometry(withGeographicDefault(spatialFilter.extent));
+        assertLatitudes(extent, readGeometryYs(spatialFilter.extent));
+        return await this.queryLayerBySpatialFilter({ ...query, geometry: extent });
       }
       return await this.queryLayerBySpatialFilter({ ...query, where: (_a = query.where) != null ? _a : "1=1" });
     }
@@ -8984,7 +9603,7 @@
       }
       await Promise.allSettled([...this.mediaChanges]);
       try {
-        await map.updateFrom(view);
+        await map.updateFrom(view, { viewpointExcluded: true });
         const behaviorOwnedLayerIds = this.activeBehaviorOwnedLayerIds();
         const liveLayers = (_c = (_b = (_a = map.layers) == null ? void 0 : _a.toArray) == null ? void 0 : _b.call(_a)) != null ? _c : [];
         const writeMessages = [];
@@ -10191,18 +10810,42 @@
       }
     }
   }
+  function isGeographic(geometry) {
+    var _a;
+    return ((_a = geometry == null ? void 0 : geometry.spatialReference) == null ? void 0 : _a.isGeographic) === true;
+  }
+  function assertLatitudes(geometry, ys) {
+    const invalid = ys.find((y) => Math.abs(y) > 90);
+    if (isGeographic(geometry) && invalid !== void 0) {
+      throw new Error(
+        `In a geographic spatial reference x is the longitude and y is the latitude, and a latitude is between -90 and 90, but y is ${invalid}. Send the spatialReference the coordinates came with.`
+      );
+    }
+  }
+  function readGeometryYs(geometry) {
+    const json = isRecord4(geometry) ? geometry : {};
+    const vertices = [json.paths, json.rings, json.points].flatMap(
+      (parts) => {
+        var _a;
+        return Array.isArray(parts) ? parts.flat(Array.isArray((_a = parts[0]) == null ? void 0 : _a[0]) ? 1 : 0) : [];
+      }
+    );
+    return [
+      json.y,
+      json.ymin,
+      json.ymax,
+      ...vertices.map((vertex) => Array.isArray(vertex) ? vertex[1] : void 0)
+    ].filter((y) => typeof y === "number");
+  }
   function withGeographicDefault(value) {
     const json = requireRecord(value, "A valid geometry JSON object is required.");
     if (isRecord4(json.spatialReference)) {
       return json;
     }
-    const xs = [json.x, json.xmin, json.xmax].filter(
-      (entry) => typeof entry === "number"
-    );
     const ys = [json.y, json.ymin, json.ymax].filter(
       (entry) => typeof entry === "number"
     );
-    if (xs.length === 0 || ys.length === 0 || xs.some((x) => Math.abs(x) > 180) || ys.some((y) => Math.abs(y) > 90)) {
+    if (ys.length === 0 || ys.some((y) => Math.abs(y) > 90)) {
       throw new Error(
         "These coordinates are not longitude and latitude, so they need their spatialReference."
       );
@@ -10212,325 +10855,6 @@
   function droppedSymbolTypes(submitted, readBack) {
     const applied = new Set(collectSymbolTypes(readBack));
     return [...new Set(collectSymbolTypes(submitted))].filter((name) => !applied.has(name));
-  }
-
-  // src/frame/auth.ts
-  function getRuntimeAuth() {
-    const auth = window.__novaAuth;
-    if (!auth || !auth.token || !auth.portalUrl) {
-      return null;
-    }
-    if (auth.expiresAt && auth.expiresAt <= Date.now()) {
-      return null;
-    }
-    return auth;
-  }
-  var enterpriseInterceptorOrigin = null;
-  var enterpriseToken = null;
-  function registerRuntimeAuth(IdentityManager, esriConfig) {
-    const auth = getRuntimeAuth();
-    delete window.__novaAuth;
-    const manager = IdentityManager;
-    const config = esriConfig;
-    if (config) {
-      delete config.apiKey;
-    }
-    if (!manager || typeof manager.registerToken !== "function" || !config || !auth) {
-      return void 0;
-    }
-    const portalUrl = applyRuntimeAuth(manager, config, auth);
-    if (portalUrl) {
-      installRuntimeAuthUpdate(manager, config, portalUrl);
-    }
-    return portalUrl;
-  }
-  function applyRuntimeAuth(manager, config, auth) {
-    try {
-      const portalUrl = portalRootUrl(auth.portalUrl);
-      config.portalUrl = portalUrl;
-      manager.registerToken({
-        server: `${portalUrl}/sharing/rest`,
-        token: auth.token,
-        expires: auth.expiresAt || void 0,
-        userId: auth.username || void 0,
-        ssl: true
-      });
-      if (isArcGisOnlinePortal(portalUrl)) {
-        config.apiKey = auth.token;
-      } else {
-        enterpriseToken = auth.token;
-        installEnterpriseInterceptor(config, portalUrl);
-      }
-      return portalUrl;
-    } catch (error) {
-      reportError("preview auth registration failed for " + auth.portalUrl, error);
-      return void 0;
-    }
-  }
-  function installRuntimeAuthUpdate(manager, config, registeredPortalUrl) {
-    window.__novaApplyAuth = (next) => {
-      if (!(next == null ? void 0 : next.token) || !next.portalUrl || portalRootUrl(next.portalUrl) !== registeredPortalUrl) {
-        return false;
-      }
-      return applyRuntimeAuth(manager, config, {
-        token: next.token,
-        portalUrl: next.portalUrl,
-        ...next.expiresAt ? { expiresAt: next.expiresAt } : {},
-        ...next.username ? { username: next.username } : {}
-      }) !== void 0;
-    };
-  }
-  function portalRootUrl(value) {
-    return value.trim().replace(/\/sharing\/rest\/?$/iu, "").replace(/\/+$/u, "");
-  }
-  function isArcGisOnlinePortal(value) {
-    const host = new URL(value).hostname.toLowerCase();
-    return host === "arcgis.com" || host.endsWith(".arcgis.com");
-  }
-  function installEnterpriseInterceptor(config, portalUrl) {
-    var _a;
-    const origin = new URL(portalUrl).origin;
-    if (enterpriseInterceptorOrigin === origin) {
-      return;
-    }
-    const interceptors = (_a = config.request) == null ? void 0 : _a.interceptors;
-    if (!interceptors) {
-      return;
-    }
-    const escapedOrigin = origin.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-    interceptors.push({
-      urls: new RegExp(`^${escapedOrigin}/`, "u"),
-      before(params) {
-        var _a2, _b, _c, _d, _e;
-        (_a2 = params.requestOptions) != null ? _a2 : params.requestOptions = {};
-        (_c = (_b = params.requestOptions).query) != null ? _c : _b.query = {};
-        if (enterpriseToken) {
-          (_e = (_d = params.requestOptions.query).token) != null ? _e : _d.token = enterpriseToken;
-        }
-      }
-    });
-    enterpriseInterceptorOrigin = origin;
-  }
-
-  // src/frame/view.ts
-  var MODULE_IDS = [
-    "esri/WebMap",
-    "esri/WebScene",
-    "esri/Basemap",
-    "esri/views/MapView",
-    "esri/views/SceneView",
-    "esri/layers/FeatureLayer",
-    "esri/layers/GraphicsLayer",
-    "esri/Graphic",
-    "esri/identity/IdentityManager",
-    "esri/config"
-  ];
-  function collectionLength(value) {
-    const collection = asRecord(value);
-    const length = collection == null ? void 0 : collection.length;
-    if (typeof length === "number") {
-      return length;
-    }
-    return typeof (collection == null ? void 0 : collection.toArray) === "function" ? collection.toArray().length : 0;
-  }
-  function declaresBasemapLayers(document2, map) {
-    const baseMap = asRecord(document2.baseMap);
-    if (Array.isArray(baseMap == null ? void 0 : baseMap.baseMapLayers) && baseMap.baseMapLayers.length > 0) {
-      return true;
-    }
-    const basemap = asRecord(map.basemap);
-    return Boolean(basemap) && (collectionLength(basemap == null ? void 0 : basemap.baseLayers) > 0 || collectionLength(basemap == null ? void 0 : basemap.referenceLayers) > 0);
-  }
-  function observeViewResize(container, view) {
-    if (typeof ResizeObserver === "undefined") {
-      return () => void 0;
-    }
-    let scheduled = false;
-    const observer = new ResizeObserver(() => {
-      if (scheduled) {
-        return;
-      }
-      scheduled = true;
-      requestAnimationFrame(() => {
-        var _a;
-        scheduled = false;
-        (_a = view.resize) == null ? void 0 : _a.call(view);
-      });
-    });
-    observer.observe(container);
-    return () => observer.disconnect();
-  }
-  function suppressViewFocusFrame(container) {
-    container.style.setProperty("--arcgis-internal-view-outline", "none");
-    container.style.setProperty("--esri-view-outline", "none");
-  }
-  function restoreBuiltInTerrain(map, mapDocument) {
-    const ground = asRecord(mapDocument.ground);
-    const groundId = typeof (ground == null ? void 0 : ground.groundId) === "string" ? ground.groundId.trim() : "";
-    if (!groundId) {
-      return void 0;
-    }
-    const customGroundLayers = readGroundLayers(map.ground);
-    map.ground = groundId;
-    const restoredGround = asRecord(map.ground);
-    const restoredGroundLayers = asRecord(restoredGround == null ? void 0 : restoredGround.layers);
-    const addGroundLayer = restoredGroundLayers == null ? void 0 : restoredGroundLayers.add;
-    if (typeof addGroundLayer !== "function") {
-      return groundId;
-    }
-    customGroundLayers.forEach((layer) => addGroundLayer.call(restoredGroundLayers, layer));
-    return groundId;
-  }
-  function readGroundLayers(ground) {
-    var _a;
-    const layers = asRecord((_a = asRecord(ground)) == null ? void 0 : _a.layers);
-    if (typeof (layers == null ? void 0 : layers.toArray) !== "function") {
-      return [];
-    }
-    const values = layers.toArray();
-    return Array.isArray(values) ? values : [];
-  }
-  function asRecord(value) {
-    return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
-  }
-  function readInitialView(mapDocument, scene) {
-    var _a;
-    const viewpoint = asRecord((_a = asRecord(mapDocument.initialState)) == null ? void 0 : _a.viewpoint);
-    const target = asRecord(viewpoint == null ? void 0 : viewpoint.targetGeometry);
-    const scale = typeof (viewpoint == null ? void 0 : viewpoint.scale) === "number" && viewpoint.scale > 0 ? viewpoint.scale : null;
-    if (scene && asRecord(viewpoint == null ? void 0 : viewpoint.camera)) {
-      return {};
-    }
-    if (!target) {
-      return {};
-    }
-    if (typeof target.xmin === "number" && typeof target.ymin === "number") {
-      return { extent: target };
-    }
-    if (typeof target.x !== "number" || typeof target.y !== "number") {
-      return {};
-    }
-    return {
-      center: target,
-      ...scale ? { scale } : {}
-    };
-  }
-  function initView(config, mapDocument) {
-    const container = document.getElementById("app-view");
-    if (!container) {
-      return Promise.reject(new Error("The app map container is missing."));
-    }
-    return new Promise((resolve, reject) => {
-      loadArcgisModules(
-        MODULE_IDS,
-        async (modules, moduleLoader) => {
-          var _a, _b, _c;
-          try {
-            const portalUrl = registerRuntimeAuth(
-              modules["esri/identity/IdentityManager"],
-              modules["esri/config"]
-            );
-            const scene = isScene(config);
-            const Document = modules[scene ? "esri/WebScene" : "esri/WebMap"];
-            const View = modules[scene ? "esri/views/SceneView" : "esri/views/MapView"];
-            if (!(Document == null ? void 0 : Document.fromJSON) || !View) {
-              throw new Error("The ArcGIS Map or View module is unavailable.");
-            }
-            const { document: readableDocument, collections } = splitRuntimeFeatureCollections(
-              mapDocument,
-              scene
-            );
-            const map = Document.fromJSON(readableDocument);
-            if (collections.length > 0) {
-              restoreFeatureCollections(
-                map,
-                collections,
-                modules["esri/layers/FeatureLayer"],
-                modules["esri/layers/GraphicsLayer"],
-                modules["esri/Graphic"]
-              );
-            }
-            if (!declaresBasemapLayers(mapDocument, map)) {
-              const Basemap = modules["esri/Basemap"];
-              const fallback = (_a = Basemap == null ? void 0 : Basemap.fromId(
-                scene ? DEFAULT_BLANK_SCENE_BASEMAP_ID : DEFAULT_BLANK_MAP_BASEMAP_ID
-              )) != null ? _a : null;
-              if (fallback) {
-                map.basemap = fallback;
-                void Promise.resolve((_b = fallback.load) == null ? void 0 : _b.call(fallback)).catch((error) => {
-                  reportError("the fallback basemap could not be loaded", error);
-                });
-              }
-            }
-            const builtInGroundId = scene ? restoreBuiltInTerrain(map, mapDocument) : void 0;
-            const appPresentation = config.nova.presentationMode === "app";
-            suppressViewFocusFrame(container);
-            const view = new View({
-              container,
-              map,
-              popup: appPresentation ? { defaultPopupTemplateEnabled: true } : null,
-              popupEnabled: appPresentation,
-              ...readInitialView(mapDocument, scene)
-            });
-            if (scene) {
-              recoverStalledSceneGoTo(view);
-            }
-            (_c = view.when) == null ? void 0 : _c.call(
-              view,
-              () => {
-                const stopObservingResize = observeViewResize(container, view);
-                window.addEventListener("pagehide", stopObservingResize, { once: true });
-                resolve({
-                  map,
-                  view,
-                  modules,
-                  moduleLoader,
-                  ...builtInGroundId ? { builtInGroundId } : {},
-                  ...portalUrl ? { portalUrl } : {}
-                });
-              },
-              (error) => reject(error)
-            );
-          } catch (error) {
-            reportError("app view could not be initialized", error);
-            reject(error);
-          }
-        },
-        reject
-      );
-    });
-  }
-  function restoreFeatureCollections(map, collections, FeatureLayer, GraphicsLayer, Graphic) {
-    var _a;
-    const document2 = map;
-    (_a = document2.when) == null ? void 0 : _a.call(document2, () => {
-      var _a2, _b, _c, _d;
-      for (const { index, json, parentId, sourceLayerType } of collections) {
-        try {
-          const layer = sourceLayerType === "graphics" ? readEmbeddedGraphicsCollectionLayer(GraphicsLayer, Graphic, json) : readEmbeddedFeatureCollectionLayer(FeatureLayer, json);
-          const target = parentId ? (_b = (_a2 = document2.findLayerById) == null ? void 0 : _a2.call(document2, parentId)) == null ? void 0 : _b.layers : document2;
-          (_c = target == null ? void 0 : target.add) == null ? void 0 : _c.call(target, layer, index);
-        } catch (error) {
-          reportError(`the layer "${String((_d = json.title) != null ? _d : json.id)}" could not be restored`, error);
-        }
-      }
-    });
-  }
-  function recoverStalledSceneGoTo(view) {
-    const goTo = view.goTo;
-    if (typeof goTo !== "function") {
-      return;
-    }
-    view.goTo = async (target, options) => {
-      try {
-        return await goTo.call(view, target, options);
-      } catch (error) {
-        if ((error == null ? void 0 : error.name) !== "GotoAnimation:missing-animation") {
-          throw error;
-        }
-        return await goTo.call(view, target, { ...options, animate: false });
-      }
-    };
   }
 
   // src/frame/main.ts
@@ -10564,7 +10888,10 @@
     const subtitle = document.getElementById("app-subtitle");
     subtitle.textContent = (_a = config.item.subtitle) != null ? _a : "";
     subtitle.hidden = !config.item.subtitle;
-    const controller = new AppRuntimeController(config, await initView(config, mapDocument));
+    const controller = new AppRuntimeController(
+      config,
+      await initView(config, mapDocument, readPreviewSessionView())
+    );
     const announceRuntimeReady = installAppRuntimeBridge(controller);
     await controller.start();
     announceRuntimeReady();

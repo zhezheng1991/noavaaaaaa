@@ -868,12 +868,16 @@ ul {
     max-height: min(10rem, 26dvh);
   }
 }
+/*
+ * A mount is not a scroll container: its side panel already scrolls. With overflow-x: auto the
+ * browser also computes overflow-y to auto, and a mount whose height ends in half a pixel then
+ * showed a vertical scrollbar while all its content was visible.
+ */
 .app-code-mount {
   width: 100%;
   min-width: 0;
   max-width: 100%;
   min-height: 1px;
-  overflow-x: auto;
 }
 .app-code-mount > * { max-width: 100%; }
 [hidden] { display: none !important; }

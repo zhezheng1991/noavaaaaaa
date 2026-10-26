@@ -1,13 +1,29 @@
 {
   "operationalLayers": [
     {
-      "id": "1a163a0db45-layer-2",
-      "opacity": 0.92,
+      "id": "1a16850aaab-layer-54",
       "title": "LakeDistrictFells",
-      "url": "https://services8.arcgis.com/VELJvq5s7onWhdB5/arcgis/rest/services/LakeDistrictFells_ALEJR/FeatureServer/0",
-      "itemId": "caf040ffba684853a9bb2116ed613c42",
+      "url": "https://services2.arcgis.com/j80Jz20at6Bi0thr/arcgis/rest/services/Lake_District_Fells/FeatureServer/0",
+      "itemId": "82227201232f43149f4423cb3b2aa44b",
       "layerType": "ArcGISFeatureLayer",
+      "blendMode": "normal",
       "layerDefinition": {
+        "fieldConfigurations": [
+          {
+            "name": "Metres",
+            "fieldFormat": {
+              "type": "number",
+              "useGrouping": "always"
+            }
+          },
+          {
+            "name": "Drop_",
+            "fieldFormat": {
+              "type": "number",
+              "useGrouping": "always"
+            }
+          }
+        ],
         "drawingInfo": {
           "renderer": {
             "type": "simple",
@@ -20,18 +36,11 @@
                 },
                 "stops": [
                   {
-                    "label": "37 m",
-                    "size": 7,
+                    "size": 5,
                     "value": 37
                   },
                   {
-                    "label": "508 m",
-                    "size": 16,
-                    "value": 507.535
-                  },
-                  {
-                    "label": "978 m",
-                    "size": 30,
+                    "size": 24,
                     "value": 978.07
                   }
                 ]
@@ -45,9 +54,9 @@
                 "stops": [
                   {
                     "color": [
-                      43,
-                      131,
-                      186,
+                      33,
+                      102,
+                      172,
                       255
                     ],
                     "label": "0 m",
@@ -55,22 +64,22 @@
                   },
                   {
                     "color": [
-                      255,
-                      255,
-                      191,
+                      247,
+                      247,
+                      247,
                       255
                     ],
-                    "label": "456 m",
+                    "label": "456.1 m",
                     "value": 456.1
                   },
                   {
                     "color": [
-                      215,
-                      25,
-                      28,
+                      178,
+                      24,
+                      43,
                       255
                     ],
-                    "label": "912 m",
+                    "label": "912.2 m",
                     "value": 912.2
                   }
                 ]
@@ -79,9 +88,9 @@
             "symbol": {
               "type": "esriSMS",
               "color": [
-                43,
-                131,
-                186,
+                33,
+                102,
+                172,
                 255
               ],
               "angle": 0,
@@ -92,19 +101,78 @@
               "outline": {
                 "type": "esriSLS",
                 "color": [
-                  255,
-                  255,
-                  255,
+                  51,
+                  51,
+                  51,
                   255
                 ],
-                "width": 0.7,
+                "width": 0.6,
                 "style": "esriSLSSolid"
               }
             }
           }
         }
       },
-      "blendMode": "normal"
+      "popupInfo": {
+        "popupElements": [
+          {
+            "type": "fields",
+            "fieldInfos": [
+              {
+                "fieldName": "Metres",
+                "isEditable": true,
+                "label": "Height (m)",
+                "visible": true
+              },
+              {
+                "fieldName": "Drop_",
+                "isEditable": true,
+                "label": "Prominence (m)",
+                "visible": true
+              },
+              {
+                "fieldName": "Classification",
+                "isEditable": true,
+                "label": "Classification",
+                "visible": true
+              },
+              {
+                "fieldName": "Area",
+                "isEditable": true,
+                "label": "Area",
+                "visible": true
+              }
+            ]
+          }
+        ],
+        "fieldInfos": [
+          {
+            "fieldName": "Metres",
+            "isEditable": true,
+            "label": "Height (m)",
+            "visible": true
+          },
+          {
+            "fieldName": "Drop_",
+            "isEditable": true,
+            "label": "Prominence (m)",
+            "visible": true
+          },
+          {
+            "fieldName": "Classification",
+            "isEditable": true,
+            "label": "Classification",
+            "visible": true
+          },
+          {
+            "fieldName": "Area",
+            "isEditable": true,
+            "label": "Area",
+            "visible": true
+          }
+        ],
+        "title": "{Name}"
+      }
     }
   ],
   "baseMap": {
@@ -138,10 +206,10 @@
           "latestWkid": 3857,
           "wkid": 102100
         },
-        "xmin": -484399.55538015015,
-        "ymin": 7138790.492111516,
-        "xmax": -206780.26864852436,
-        "ymax": 7399287.884507271
+        "xmin": -1825410.7796149561,
+        "ymin": 5248655.656676153,
+        "xmax": 1134230.9555862816,
+        "ymax": 9289422.719942635
       }
     }
   },

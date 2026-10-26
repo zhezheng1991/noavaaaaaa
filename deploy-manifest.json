@@ -1,11 +1,11 @@
 {
   "kind": "arcgis-nova-deployable-app",
   "version": "0.1",
-  "generatedAt": "2026-10-22T12:39:28.797Z",
-  "title": "LakeDistrictFells triangle styling",
+  "generatedAt": "2026-10-23T10:30:00.627Z",
+  "title": "LakeDistrictFells — Height and Prominence",
   "authMode": "oauth",
   "entry": "index.html",
-  "sourceAppPath": "outputs/apps/2026-10-22T12-39-28-e9392cdd-9bc7-43f3-9b12-42a98993070a/index.html",
+  "sourceAppPath": "outputs/apps/2026-10-23T10-30-00-064ee47f-be86-43ee-9862-5ba221c72e9b/index.html",
   "files": {
     "app": "app.json",
     "map": "map.json",
@@ -13,6 +13,6 @@
     "auth": "standalone-auth.js"
   },
   "portalUrl": "https://www.arcgis.com",
-  "appId": "SZDY4z9Ep8M8RZ5r",
+  "appId": "Lw3rQD97pjtVg9FL",
   "deploymentUrl": "https://zhezheng1991.github.io/noavaaaaaa/"
 }

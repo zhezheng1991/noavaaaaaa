@@ -1,10 +1,9 @@
 {
   "version": "0.3",
   "kind": "app",
-  "generatedAt": "2026-10-22T12:39:28.798Z",
+  "generatedAt": "2026-10-23T10:30:00.628Z",
   "item": {
-    "title": "LakeDistrictFells triangle styling",
-    "subtitle": "Triangle symbols sized by height and colored by prominence"
+    "title": "LakeDistrictFells — Height and Prominence"
   },
   "map": {
     "type": "webmap",
@@ -12,8 +11,8 @@
   },
   "app": {
     "template": "nova-app",
-    "preset": "analysis",
-    "showHeader": true,
+    "preset": "map",
+    "showHeader": false,
     "theme": {
       "mode": "light",
       "accent": "default"
@@ -21,31 +20,27 @@
     "layout": {
       "right": {
         "hidden": false,
-        "width": "360px",
-        "title": "Style controls",
+        "title": "Layer colors",
         "collapsed": false,
         "blocks": [
           {
             "type": "customMount",
-            "id": "fell-style-controls",
-            "title": "LakeDistrictFells style"
+            "id": "fell-colors"
           }
         ]
       }
     },
     "widgets": [
       {
-        "id": "legend",
+        "id": "fells-legend",
         "type": "legend",
         "slot": "bottom-left",
-        "title": "Legend",
         "config": {}
       },
       {
-        "id": "layer-list",
+        "id": "default-layer-list",
         "type": "layerList",
         "slot": "top-right",
-        "title": "Layers",
         "config": {}
       },
       {
@@ -58,53 +53,33 @@
     "interactions": [],
     "behaviors": [
       {
-        "id": "fell-style-controls",
-        "label": "LakeDistrictFells color ramp controls",
-        "bundlePath": "./runtime/behaviors/fell-style-controls-cd5caa5460dd1f24.js",
-        "sourceSha256": "cd5caa5460dd1f2438ebfb051c40c875fe04d660017c1d2d735978945575244a",
+        "id": "fell-color-controls",
+        "label": "Prominence color ramp controls",
+        "bundlePath": "./runtime/behaviors/fell-color-controls-313850aa846f1893.js",
+        "sourceSha256": "313850aa846f1893d3c92178e10994ba9dc78dd99a28aaf14cc7d875547f78c0",
         "modulePaths": [],
         "config": {
-          "layerId": "1a163a0db45-layer-2",
-          "heightField": "Metres",
-          "prominenceField": "Drop_",
-          "objectIdField": "ObjectId",
-          "defaults": {
-            "minHeight": 37,
-            "midHeight": 507.535,
-            "maxHeight": 978.07,
-            "minProminence": 0,
-            "midProminence": 456.1,
-            "maxProminence": 912.2,
-            "sizeMin": 7,
-            "sizeMid": 16,
-            "sizeMax": 30,
-            "ramp": "blue-red",
-            "colors": [
-              "#2b83ba",
-              "#ffffbf",
-              "#d7191c"
-            ]
-          }
+          "layerId": "1a16850aaab-layer-54"
         },
         "mounts": [
-          "fell-style-controls"
+          "fell-colors"
         ],
         "ownedLayerIds": [],
         "interactions": [],
-        "installedAt": "2026-10-22T12:41:36.554Z"
+        "installedAt": "2026-10-23T10:32:06.927Z"
       }
     ]
   },
   "nova": {
-    "basename": "e9392cdd-9bc7-43f3-9b12-42a98993070a",
+    "basename": "064ee47f-be86-43ee-9862-5ba221c72e9b",
     "presentationMode": "app",
     "ownedGraphicsLayerIds": [],
     "origin": {
       "portalUrl": "https://www.arcgis.com",
-      "mapId": "output-108eb538-095c-438f-bd59-d8f1414e6105",
+      "mapId": "output-3860f24d-d668-4bfb-8f8d-811fb2d017fa",
       "mapName": "New Conversation",
       "viewMode": "2d",
-      "capturedAt": "2026-10-22T12:39:28.797Z"
+      "capturedAt": "2026-10-23T10:30:00.627Z"
     },
     "sourceSelection": {
       "mode": "all"
